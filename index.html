@@ -1,30 +1,12 @@
 <!DOCTYPE html>
-<!--
-GROQ Prompt:
-
-write a short JS tool, where user post a question to ai-models team. first will give concise, complete reply to the answer and save in a conclusion, then second reads that and correct or accept it, then third do the same, and it keeps running unless all accept the answer OR everyone gets 3 turns. Show final result as conclusion.
-
-keep ui modern and slick with team chat mode style - properly format the output of each reply.
-
-All will use one groq key '[your-groq-api-key]' for all, just change models. 
-Also test all model are getting correct output.
-
-models:
-openai/gpt-oss-120b
-meta-llama/llama-4-scout-17b-16e-instruct
-qwen/qwen3-32b
-groq/compound
-
-make one file solution.
--->
-
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AI Models Team Chat</title>
+<title>AI‑Models Team Chat</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  :root {
+  /* ---------- Root ---------- */
+  :root{
     --bg:#f7f9fc;
     --card:#fff;
     --primary:#4f46e5;
@@ -32,96 +14,340 @@ make one file solution.
     --radius:12px;
     --shadow:0 4px 12px rgba(0,0,0,.08);
   }
-  body{margin:0;background:var(--bg);font-family:'Inter',sans-serif;display:flex;flex-direction:column;height:100vh;}
-  .chat{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:0.75rem;}
-  .msg{max-width:70%;padding:0.75rem 1rem;border-radius:var(--radius);box-shadow:var(--shadow);line-height:1.4;}
-  .msg.user{align-self:flex-end;background:var(--primary);color:#fff;}
-  .msg.bot{align-self:flex-start;background:var(--card);color:#111;}
-  .msg .model{font-size:0.75rem;font-weight:600;margin-bottom:0.25rem;color:var(--secondary);}
-  .input-bar{display:flex;padding:1rem;background:#fff;box-shadow:var(--shadow);}
-  .input-bar input{flex:1;padding:0.75rem 1rem;border:1px solid #e2e8f0;border-radius:var(--radius);font-size:1rem;}
-  .input-bar button{margin-left:0.5rem;padding:0 1.5rem;background:var(--primary);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;}
-  .final{background:var(--secondary);color:#fff;padding:1rem;margin:1rem;border-radius:var(--radius);}
-  .msg table,.final table{width:100%;border-collapse:collapse;margin:0.5rem 0;}
-  .msg th,.msg td,.final th,.final td{border:1px solid #e2e8f0;padding:0.4rem 0.6rem;text-align:left;}
-  .msg th,.final th{font-weight:600;}
-</style>
-</head>
-<body>
 
-<div class="chat" id="chat"></div>
-
-<div class="input-bar">
-  <input type="text" id="questionInput" placeholder="Ask the team a question…" />
-  <button id="sendBtn">Send</button>
-</div>
-
-<script>
-/* ==================== CONFIG ==================== */
-
-// replace this with your groq key: https://console.groq.com
-const GROQ_KEY = '[your-api-groq-key]';
-const MODELS = [
-  { name: 'meta-llama/llama-4-scout-17b-16e-instruct', turn:0, accepted:false },
-  { name: 'openai/gpt-oss-120b',               turn:0, accepted:false },
-  { name: 'groq/compound',                    turn:0, accepted:false },
-  { name: 'qwen/qwen3-32b',                    turn:0, accepted:false },
-];
-const MAX_TURNS = 3;
-const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const MIN_THINK_TIME_MS = 2000;   // <-- 2‑second minimum
-
-/* ==================== UTILITIES ==================== */
-// tiny sleep helper
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-
-/* ==================== UI HELPERS ==================== */
-const chatEl = document.getElementById('chat');
-
-/**
- * Append a new chat bubble.
- * @param {string} text  Markdown‑formatted text.
- * @param {'user'|'bot'} from  Who sent it.
- * @param {string} [model]  Optional model name to show above the bubble.
- */
-function addMessage(text, from='bot', model='') {
-  const div = document.createElement('div');
-  div.className = `msg ${from}`;
-
-  // Convert Markdown → safe HTML (using marked.js)
-  const html = marked.parse(text, {
-    gfm: true,
-    breaks: true,
-    smartLists: true
-  });
-
-  if (model) {
-    div.innerHTML = `<div class="model">${model}</div>` + html;
-  } else {
-    div.innerHTML = html;
+  /* ---------- Body & Layout ---------- */
+  body{
+    margin:0;
+    background:var(--bg);
+    font-family:'Inter',sans-serif;
+    display:flex;
+    height:100vh;
+  }
+  #sidebar{
+    width:260px;
+    background:#fff;
+    border-right:1px solid #e2e8f0;
+    display:flex;
+    flex-direction:column;
+    padding:0.5rem;
+  }
+  #sidebar h2{font-size:1.25rem;margin:0.5rem 0;}
+  #newChatBtn{
+    padding:0.5rem 1rem;
+    margin-bottom:0.5rem;
+    background:var(--primary);
+    color:#fff;
+    border:none;
+    border-radius:var(--radius);
+    cursor:pointer;
+    font-weight:600;
+  }
+  .chat-list{
+    flex:1;
+    overflow-y:auto;
+    padding-right:0.25rem;           /* keep scrollbar inside */
+  }
+  .chat-list h2{
+    font-size:1rem;
+    margin:0.5rem 0 0.25rem 0;
+    color:var(--secondary);
+  }
+  .chat-item{
+    padding:0.5rem;
+    border-bottom:1px solid #e2e8f0;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    cursor:pointer;
+  }
+  .chat-item.active{background:#e6f4ff;}
+  .chat-item:hover{background:#f0faff;}
+  .chat-item .info{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+  }
+  .chat-item .info .title{
+    font-weight:600;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .chat-item .info .date{
+    font-size:0.75rem;
+    color:var(--secondary);
+  }
+  .chat-item .delete{
+    font-size:1.25rem;
+    cursor:pointer;
+    padding:0 0.25rem;
+    color:var(--secondary);
+    margin-left:8px;
+    flex-shrink:0;
+  }
+  .empty-msg{
+    padding:0.5rem;
+    color:var(--secondary);
   }
 
+  /* ---------- Chat area ---------- */
+  #chatContainer{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+  }
+  #chat{
+    flex:1;
+    overflow-y:auto;
+    padding:1rem;
+    display:flex;
+    flex-direction:column;
+    gap:0.75rem;
+  }
+  .msg{
+    max-width:70%;
+    padding:0.75rem 1rem;
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    line-height:1.4;
+  }
+  .msg.user{
+    align-self:flex-end;
+    background:var(--primary);
+    color:#fff;
+  }
+  .msg.bot{
+    align-self:flex-start;
+    background:var(--card);
+    color:#111;
+  }
+  .msg .model{
+    font-size:0.75rem;
+    font-weight:600;
+    margin-bottom:0.25rem;
+    color:var(--secondary);
+  }
+  .input-bar{
+    display:flex;
+    padding:1rem;
+    background:#fff;
+    box-shadow:var(--shadow);
+  }
+  .input-bar input{
+    flex:1;
+    padding:0.75rem 1rem;
+    border:1px solid #e2e8f0;
+    border-radius:var(--radius);
+    font-size:1rem;
+  }
+  .input-bar button{
+    margin-left:0.5rem;
+    padding:0 1.5rem;
+    background:var(--primary);
+    color:#fff;
+    border:none;
+    border-radius:var(--radius);
+    cursor:pointer;
+  }
+  .final{
+    background:var(--secondary);
+    color:#fff;
+    padding:1rem;
+    margin:1rem;
+    border-radius:var(--radius);
+  }
+  .msg table,.final table{
+    width:100%;
+    border-collapse:collapse;
+    margin:0.5rem 0;
+  }
+  .msg th,.msg td,.final th,.final td{
+    border:1px solid #e2e8f0;
+    padding:0.4rem 0.6rem;
+    text-align:left;
+  }
+  .msg th,.final th{font-weight:600;}
+
+  /* ---------- Scrollbars ---------- */
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px;}
+</style>
+</head>
+
+<body>
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <h2>Chats</h2>
+    <button id="newChatBtn">+ New Chat</button>
+    <div class="chat-list" id="chatList"></div>
+  </div>
+
+  <!-- Main chat area -->
+  <div id="chatContainer">
+    <div class="chat" id="chat"></div>
+    <div class="input-bar">
+      <input type="text" id="questionInput" placeholder="Ask the team a question…" />
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+<script src="config.js"></script>
+<script>
+/* ==================== CONFIG ==================== */
+const DEFAULT_GROQ_KEY = GROQ_KEY3; // fallback
+const MODELS = [
+  { name: 'meta-llama/llama-4-scout-17b-16e-instruct', key: GROQ_KEY1, turn:0, accepted:false },
+  { name: 'openai/gpt-oss-120b',               key: GROQ_KEY2, turn:0, accepted:false },
+];
+const MAX_TURNS = 1;
+const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const MIN_THINK_TIME_MS = 1000;   // minimum “thinking” pause
+
+/* ==================== STORAGE ==================== */
+const STORAGE_KEY = 'chat_sessions';
+function loadSessions(){ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+function saveSessions(s){ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+
+/* ==================== GLOBAL STATE ==================== */
+let sessions       = loadSessions();                     // persisted chats
+let currentSession = null;                               // session being displayed
+let pendingSession = null;                               // session that exists while first answer is streaming
+let userQuestion   = '';                                 // the question user just typed
+let conclusion     = '';                                 // current working conclusion
+
+/* ==================== HELPERS ==================== */
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function formatDate(ts){ return new Date(ts).toLocaleString(); }
+
+/* Clean a string to use as a short title */
+function cleanTitle(txt){
+  if(!txt) return '';
+  txt = txt.replace(/[*_`~>#-]/g,'');
+  txt = txt.replace(/[^a-zA-Z0-9\s]/g,'');
+  return txt.replace(/\s+/g,' ').trim();
+}
+
+/* ==================== UI ==================== */
+const chatEl     = document.getElementById('chat');
+const chatListEl = document.getElementById('chatList');
+
+/* Add a bubble (user / bot) */
+function addMessage(text, from='bot', model=''){
+  const div = document.createElement('div');
+  div.className = `msg ${from}`;
+  const html = marked.parse(text, {gfm:true, breaks:true, smartLists:true});
+  div.innerHTML = model ? `<div class="model">${model}</div>${html}` : html;
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-/**
- * Show the final conclusion after the team finishes.
- */
+/* Final conclusion box */
 function setFinal(text){
   const fin = document.createElement('div');
   fin.className='final';
-  const html = marked.parse(text, {
-    gfm: true,
-    breaks: true,
-    smartLists: true
-  });
-  fin.innerHTML = `<strong>Final Conclusion:</strong> ${html}`;
+  fin.innerHTML = `<strong>Final Conclusion:</strong> ${marked.parse(text,{gfm:true,breaks:true,smartLists:true})}`;
   chatEl.appendChild(fin);
 }
 
-/* ==================== GROQ CALL ==================== */
-async function callModel(model, messages){
+/* Render recent‑chat list – always shows the “Recents” heading */
+function renderChatList(){
+  chatListEl.innerHTML = '';
+
+  const heading = document.createElement('h2');
+  heading.textContent = 'Recents';
+  chatListEl.appendChild(heading);
+
+  if (sessions.length){
+    sessions.forEach(s=>{
+      const item = document.createElement('div');
+      item.className='chat-item';
+      if (s.id===currentSession?.id) item.classList.add('active');
+      item.dataset.id=s.id;
+
+      const info = document.createElement('div');
+      info.className='info';
+      const title = document.createElement('div');
+      title.className='title';
+      title.textContent = cleanTitle(s.title) || 'Untitled';
+      const date = document.createElement('div');
+      date.className='date';
+      date.textContent = formatDate(s.start);
+      info.appendChild(title);
+      info.appendChild(date);
+
+      const del = document.createElement('div');
+      del.className='delete';
+      del.textContent='✗';
+
+      item.appendChild(info);
+      item.appendChild(del);
+      chatListEl.appendChild(item);
+    });
+  }else{
+    const empty = document.createElement('div');
+    empty.className='empty-msg';
+    empty.textContent = 'No recent chats';
+    chatListEl.appendChild(empty);
+  }
+}
+
+/* Paint the messages of the active chat */
+function renderChatHistory(){
+  chatEl.innerHTML = '';
+  if(!currentSession) return;
+  currentSession.messages.forEach(m=>{
+    addMessage(m.content, m.role==='user' ? 'user' : 'bot', m.model||'');
+  });
+}
+
+/* ------------------- SESSION CREATION ------------------- */
+
+/* Called when the user presses “+ New Chat”. It clears the UI but
+   leaves the persisted sessions untouched. */
+function startBlankSession(){
+  pendingSession   = null;
+  currentSession   = null;
+  chatEl.innerHTML = '';
+  document.getElementById('questionInput').value = '';
+  document.getElementById('questionInput').focus();
+  renderChatList();               // only the “Recents” heading stays visible
+}
+
+/* A session that lives only while the first answer is being generated */
+function createPendingSession(){
+  const now = Date.now().toString();
+  pendingSession = {
+    id: now,
+    title: '',
+    start: Date.now(),
+    messages: [],
+    lastQuestion: '',
+    conclusion: ''
+  };
+  currentSession = pendingSession;
+}
+
+/* Turn a pending session into a real one (store it + show in Recents) */
+async function commitPendingSession(){
+  if(!pendingSession) return;
+
+  // If we still don’t have a title, ask the model to create one.
+  if(!pendingSession.title){
+    const aiTitle = await generateTitle(pendingSession.lastQuestion, pendingSession.conclusion);
+    pendingSession.title = cleanTitle(aiTitle);
+  }else{
+    pendingSession.title = cleanTitle(pendingSession.title);
+  }
+
+  // Push to the front of the array (most‑recent first) and persist.
+  sessions.unshift(pendingSession);
+  pendingSession = null;
+  saveSessions(sessions);
+  renderChatList();
+}
+
+/* ------------------- GROQ CALL ------------------- */
+async function callModel(model, messages, key){
   const payload = {
     model,
     messages,
@@ -129,93 +355,87 @@ async function callModel(model, messages){
     max_tokens:1024,
     stream:false
   };
-
-  try {
+  try{
     const res = await fetch(ENDPOINT,{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        'Authorization':`Bearer ${GROQ_KEY}`
+        'Authorization':`Bearer ${key || DEFAULT_GROQ_KEY}`
       },
       body:JSON.stringify(payload)
     });
 
-    // ------------ RATE‑LIMIT HANDLING ------------
-    if (res.status === 429) {
-      const retryAfter = res.headers.get('Retry-After') || 'a few minutes';
-      const errMsg = `🚨 Rate limit exceeded (429). Please wait ${retryAfter} before trying again.`;
-      addMessage(errMsg, 'bot');
+    if (res.status===429){
+      const retry = res.headers.get('Retry-After') || 'a few minutes';
+      addMessage(`🚨 Rate limit (429). Please wait ${retry}.`, 'bot');
       throw new Error('RATE_LIMIT');
     }
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`API error ${res.status}: ${errBody}`);
+    if (!res.ok){
+      const txt = await res.text();
+      throw new Error(`API error ${res.status}: ${txt}`);
     }
-
     const data = await res.json();
     return data.choices[0].message.content.trim();
-
-  } catch (e) {
-    if (e.message !== 'RATE_LIMIT') {
+  }catch(e){
+    if(e.message!=='RATE_LIMIT'){
       addMessage(`⚠️ ${e.message}`, 'bot');
     }
     throw e;
   }
 }
 
-/* ==================== CORE LOGIC ==================== */
-let userQuestion = '';
-let conclusion   = '';   // shared answer that gets refined
+/* ------------------- TITLE GENERATION ------------------- */
+async function generateTitle(question, answer){
+  const sys = "You are a helpful AI that creates short, descriptive titles (max 30 characters) for a Q&A conversation.";
+  const usr = `Question: ${question}\nAnswer: ${answer}\n\nProvide only the title, no extra text.`;
+  const model = MODELS[0].name;
+  const key   = MODELS[0].key;
+  const raw   = await callModel(model, [{role:'system',content:sys},{role:'user',content:usr}], key);
+  return raw.replace(/["'\n\r]+/g,'').trim().slice(0,30);
+}
 
+/* ------------------- CORE TEAM LOOP ------------------- */
 async function runTeamLoop(){
-  // reset per‑question state
-  MODELS.forEach(m=>{m.turn=0; m.accepted=false;});
-  conclusion = '';
+  // Reset per‑run bookkeeping
+  MODELS.forEach(m=>{ m.turn=0; m.accepted=false; });
+  // Pull any previously‑saved conclusion (or start from scratch)
+  conclusion = currentSession.conclusion || '';
   let anyChange = true;
 
-  try {
+  try{
     while(anyChange){
       anyChange = false;
-
       for(const bot of MODELS){
-        if(bot.accepted) continue;
-        if(bot.turn >= MAX_TURNS) continue;
-
+        if(bot.accepted || bot.turn>=MAX_TURNS) continue;
         bot.turn++;
         const turnInfo = ` (turn ${bot.turn}/${MAX_TURNS})`;
         addMessage(`Thinking${turnInfo}…`, 'bot', bot.name);
+        const start = Date.now();
 
-        // ----------- ENSURE MINIMUM THINKING TIME ------------
-        const thinkStart = Date.now();
-
-        // ---------- Prompt construction ----------
         let systemPrompt, userPrompt;
-        if(conclusion===''){
-          systemPrompt = `You are a helpful AI assistant. Answer the user's question as concisely and completely as possible.`;
+        if(!conclusion){
+          // First pass – we only have the user question
+          systemPrompt = "You are a helpful AI assistant. Answer the user's question as concisely and completely as possible.";
           userPrompt   = `Question: ${userQuestion}`;
         }else{
-          systemPrompt = `You are a reviewer AI. Read the provided answer for question: '${userQuestion}'. If it is correct, reply with the single word "ACCEPT". If you find any mistake or missing detail, reply with a corrected version of the answer (no need to say "CORRECTED", just give the improved answer). Be brief but accurate.`;
+          // Subsequent passes – we already have a draft answer
+          systemPrompt = `You are a reviewer AI. Read the provided answer for the question: "${userQuestion}". If it is correct, reply with the single word "ACCEPT". Otherwise, reply with an improved version of the answer.`;
           userPrompt   = `Current answer:\n${conclusion}\n\nYour response:`;
         }
 
-        // ---------- Model call ----------
         const response = await callModel(bot.name, [
-          {role:'system', content:systemPrompt},
-          {role:'user',   content:userPrompt}
-        ]);
+          {role:'system',content:systemPrompt},
+          {role:'user',content:userPrompt}
+        ], bot.key);
 
-        // Wait the remaining time if the API was faster than MIN_THINK_TIME_MS
-        const elapsed = Date.now() - thinkStart;
-        if (elapsed < MIN_THINK_TIME_MS) {
-          await sleep(MIN_THINK_TIME_MS - elapsed);
-        }
+        const elapsed = Date.now() - start;
+        if (elapsed < MIN_THINK_TIME_MS) await sleep(MIN_THINK_TIME_MS - elapsed);
 
-        console.log(`[${bot.name}] raw response:`, response);
         addMessage(response, 'bot', bot.name);
+        currentSession.messages.push({role:'assistant', content:response, model:bot.name});
 
-        // ---------- Interpretation ----------
-        if(conclusion===''){
+        if(!conclusion){
+          // First draft answer
           conclusion = response;
           anyChange = true;
           continue;
@@ -232,14 +452,17 @@ async function runTeamLoop(){
         }
       }
 
-      // stop when everyone has accepted or all have exhausted their turns
-      if (MODELS.every(b=>b.accepted)) break;
-      if (MODELS.every(b=>b.turn>=MAX_TURNS)) break;
+      // stop when everybody accepted OR everyone exhausted their turns
+      if (MODELS.every(b=>b.accepted) || MODELS.every(b=>b.turn>=MAX_TURNS)) break;
     }
 
     setFinal(conclusion || 'No conclusion could be reached.');
-
-  } catch (e){
+    // Store the final conclusion back onto the session object
+    currentSession.conclusion = conclusion;
+    // If this was a brand‑new chat, generate a title and persist it.
+    if(pendingSession) await commitPendingSession();
+    else saveSessions(sessions);          // existing chat – just persist the updated conclusion
+  }catch(e){
     console.warn('Team loop halted:', e);
   }
 }
@@ -249,15 +472,73 @@ document.getElementById('sendBtn').addEventListener('click', async ()=>{
   const inp = document.getElementById('questionInput');
   const q   = inp.value.trim();
   if(!q) return;
+
+  /* -------------------------------------------------
+     1️⃣  If we are not currently viewing a session,
+        this is a brand‑new chat → create a *pending*
+        session that lives only until the first answer
+        arrives.
+     2️⃣  If we already have a session (loaded from Recents),
+        we keep using it – the old conclusion is already
+        stored in `currentSession.conclusion`.
+     ------------------------------------------------- */
+  if(!currentSession){
+    createPendingSession();
+  }
+
+  // Remember the fresh question both in UI and on the session object
   userQuestion = q;
   addMessage(q, 'user');
+  currentSession.messages.push({role:'user', content:q});
+  currentSession.lastQuestion = q;   // saved for title generation later
+
   inp.value = '';
-  await runTeamLoop();
+  await runTeamLoop();   // runs the reviewer loop and finally persists the chat
 });
 
 document.getElementById('questionInput').addEventListener('keypress', e=>{
   if(e.key==='Enter') document.getElementById('sendBtn').click();
 });
+
+/* “+ New Chat” – just clears everything, no history entry is created */
+document.getElementById('newChatBtn').addEventListener('click', ()=>{
+  startBlankSession();
+});
+
+/* Clicks inside the recent‑chat list */
+chatListEl.addEventListener('click', e=>{
+  const item = e.target.closest('.chat-item');
+  if(!item) return;
+  const id = item.dataset.id;
+
+  // Delete button
+  if(e.target.classList.contains('delete')){
+    e.stopPropagation();
+    if(confirm('Delete this chat?')){
+      sessions = sessions.filter(s=>s.id!==id);
+      if(currentSession?.id===id){
+        startBlankSession();
+      }
+      renderChatList();
+      saveSessions(sessions);
+    }
+    return;
+  }
+
+  // Load a stored chat
+  const sess = sessions.find(s=>s.id===id);
+  if(sess){
+    currentSession = sess;
+    renderChatList();
+    renderChatHistory();
+    // The old conclusion is now available for the next question
+    // (no extra UI work – the loop reads it from currentSession.conclusion)
+  }
+});
+
+/* ==================== INITIALIZE ==================== */
+/* The app always starts on a blank screen. */
+startBlankSession();
 </script>
 
 <!-- Marked.js – Markdown parser -->
